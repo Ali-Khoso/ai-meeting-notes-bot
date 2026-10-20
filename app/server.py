@@ -1,4 +1,4 @@
-"""Single-user localhost app. Run one server process per audio container."""
+"""Fathom-backed, localhost-only notes app. Python 3.10+, no pip install required."""
 import json
 import os
 import shutil
@@ -7,59 +7,50 @@ import uuid
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
-
-from app import bot
-from app.core import Store, analyze, meeting_url, transcript_text
+from urllib.parse import urlsplit, parse_qs
+from app.config import load_env
+from app import fathom
+from app.core import Store, analyze, transcript_text
 
 ROOT = Path(__file__).resolve().parent.parent
+load_env(ROOT / '.env')
 store = Store(os.getenv('DATA_DIR', str(ROOT / 'data')))
 busy = threading.Lock()
-events = {}
 
 
-def process(key, stop, retry=False):
+def process(key, analysis=False):
     try:
-        if not retry:
-            item = store.get(key)
-            output = store.folder(key) / 'audio.wav'
-            ok = bot.capture(item['url'], output, stop, lambda s: store.update(key, status=s))
-            if not ok:
-                store.update(key, status='cancelled', error='Stopped before audio was captured.')
-                return
-            store.update(key, status='transcribing')
-            segments = bot.transcribe(output)
-            store.update(key, segments=segments)
+        item = store.get(key)
+        if analysis:
+            report = analyze(item['segments'])
+            store.update(key, status='completed', report=report, error=None)
         else:
-            segments = store.get(key)['segments']
-        if not segments:
-            store.update(key, status='no_speech', error='No speech was detected. Check meeting audio and retry.')
-            return
-        store.update(key, status='analyzing')
-        report = analyze(segments)
-        store.update(key, status='completed', report=report, error=None)
+            segments, summary, warning = fathom.get_recording(item['recording_id'])
+            same = item.get('segments') == segments
+            store.update(key, status='imported', segments=segments,
+                         fathom_summary=summary or (item.get('fathom_summary', '') if same else ''),
+                         report=item.get('report') if same else None, error=None, warning=warning)
     except Exception as exc:
-        # No credentials are used. Keep a concise failure visible; retain transcript for retry.
-        store.update(key, status='failed', error=str(exc)[:600])
+        # Provider response bodies and credentials are never returned to the browser.
+        message = str(exc) if isinstance(exc, fathom.FathomError) else (
+            'Local analysis failed. Check that Ollama is running and the selected model is downloaded; then retry.'
+            if analysis else 'Import failed. Check the recording in Fathom and try again.')
+        store.update(key, status='failed', error=message)
     finally:
-        events.pop(key, None)
         busy.release()
 
 
-def start_job(key, retry=False):
-    stop = threading.Event()
-    events[key] = stop
+def start_job(key, analysis=False):
     try:
-        threading.Thread(target=process, args=(key, stop, retry), daemon=True).start()
+        threading.Thread(target=process, args=(key, analysis), daemon=True).start()
     except Exception:
-        events.pop(key, None)
         busy.release()
         raise
 
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
-        pass  # Avoid meeting URLs or private transcript content in access logs.
+        pass
 
     def send(self, code, body, kind='application/json'):
         if kind == 'application/json':
@@ -94,17 +85,20 @@ class Handler(BaseHTTPRequestHandler):
             if path == '/api/meetings':
                 return self.send(200, store.all())
             if path == '/api/health':
-                return self.send(200, {'status': 'ok', 'busy': busy.locked()})
+                return self.send(200, {'status': 'ok', 'busy': busy.locked(),
+                                      'fathom_configured': bool(os.getenv('FATHOM_API_KEY', '').strip())})
             parts = path.strip('/').split('/')
             if len(parts) == 4 and parts[:2] == ['api', 'meetings'] and parts[3] == 'export':
                 item = store.get(parts[2])
-                return self.send(200, transcript_text(item.get('segments', [])) + '\n\n' + json.dumps(item.get('report', {}), ensure_ascii=False, indent=2), 'text/plain')
+                body = (item['title'] + '\n\nTRANSCRIPT\n' + transcript_text(item.get('segments', []))
+                        + '\n\nFATHOM SUMMARY\n' + item.get('fathom_summary', '')
+                        + '\n\nLOCAL ANALYSIS\n' + json.dumps(item.get('report'), ensure_ascii=False, indent=2))
+                return self.send(200, body, 'text/plain')
             return self.send(404, {'error': 'Not found.'})
         except (FileNotFoundError, ValueError):
             return self.send(404, {'error': 'Meeting not found.'})
 
     def do_POST(self):
-        # Reject cross-origin writes, including malicious web pages targeting localhost.
         if not self.local() or self.headers.get('Origin') != 'http://' + self.headers.get('Host', ''):
             return self.send(403, {'error': 'Open the app on localhost before making changes.'})
         try:
@@ -115,34 +109,33 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(data, dict):
                 raise ValueError('Expected a JSON object.')
             parts = urlsplit(self.path).path.strip('/').split('/')
-            if parts == ['api', 'meetings']:
-                url = meeting_url(data.get('url'))
-                if data.get('consent') is not True:
-                    raise ValueError('Confirm that participants know and agree to recording.')
+            if parts == ['api', 'fathom', 'meetings']:
+                return self.send(200, fathom.list_meetings(data.get('cursor', '')))
+            if parts == ['api', 'fathom', 'import']:
+                rid = fathom.recording_id(data.get('recording_id'))
                 if not busy.acquire(blocking=False):
-                    return self.send(409, {'error': 'One meeting at a time. Wait for the current job to finish.'})
-                key = uuid.uuid4().hex
-                item = dict(id=key, title=str(data.get('title') or 'Untitled meeting')[:120], url=url,
-                            created=datetime.now(timezone.utc).isoformat(), status='starting',
-                            consent=True, segments=[], report=None, error=None)
+                    return self.send(409, {'error': 'Another import or analysis is running.'})
+                key = uuid.uuid5(uuid.NAMESPACE_URL, 'fathom-recording:' + rid).hex
                 try:
+                    try:
+                        item = store.get(key)
+                    except FileNotFoundError:
+                        item = dict(id=key, title=str(data.get('title') or 'Fathom recording ' + rid)[:120],
+                                    created=datetime.now(timezone.utc).isoformat(), recording_id=rid,
+                                    source='fathom', segments=[], report=None, fathom_summary='')
+                    item.update(status='importing', error=None, warning=None)
                     store.put(item)
                 except Exception:
                     busy.release()
                     raise
                 start_job(key)
-                return self.send(201, item)
+                return self.send(202, item)
             if len(parts) == 4 and parts[:2] == ['api', 'meetings']:
                 key, action = parts[2:]
                 item = store.get(key)
-                if action == 'stop':
-                    if item['status'] not in {'starting', 'waiting', 'recording'} or key not in events:
-                        return self.send(409, {'error': 'This meeting is not currently recording or waiting.'})
-                    events[key].set()
-                    return self.send(200, {'status': 'stopping'})
                 if action == 'analyze':
                     if not item.get('segments'):
-                        raise ValueError('No saved transcript is available.')
+                        raise ValueError('Import a transcript before analyzing.')
                     if not busy.acquire(blocking=False):
                         return self.send(409, {'error': 'Another job is running.'})
                     try:
@@ -150,10 +143,9 @@ class Handler(BaseHTTPRequestHandler):
                     except Exception:
                         busy.release()
                         raise
-                    start_job(key, retry=True)
+                    start_job(key, analysis=True)
                     return self.send(202, {'status': 'analyzing'})
                 if action == 'delete':
-                    # Global lock prevents deleting data used by the worker.
                     if not busy.acquire(blocking=False):
                         return self.send(409, {'error': 'Wait until the current job finishes before deleting.'})
                     try:
@@ -162,6 +154,8 @@ class Handler(BaseHTTPRequestHandler):
                         busy.release()
                     return self.send(200, {'status': 'deleted'})
             return self.send(404, {'error': 'Not found.'})
+        except fathom.FathomError as exc:
+            return self.send(502, {'error': str(exc)})
         except FileNotFoundError:
             return self.send(404, {'error': 'Meeting not found.'})
         except (ValueError, TypeError) as exc:
@@ -172,6 +166,5 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == '__main__':
     store.recover()
-    host = os.getenv('BIND_HOST', '127.0.0.1')
-    print('Meeting Notes is ready at http://localhost:8000', flush=True)
-    ThreadingHTTPServer((host, 8000), Handler).serve_forever()
+    print('Meeting Notes is ready at http://localhost:8000 — press Ctrl+C to stop.', flush=True)
+    ThreadingHTTPServer(('127.0.0.1', 8000), Handler).serve_forever()

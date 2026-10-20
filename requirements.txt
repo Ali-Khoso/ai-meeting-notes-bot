@@ -1,2 +1,2 @@
-playwright==1.55.0
-faster-whisper==1.2.0
+# The Fathom dashboard uses Python 3.10+ standard library only.
+# No pip packages, Docker, FFmpeg or Playwright are required.

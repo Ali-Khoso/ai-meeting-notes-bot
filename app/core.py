@@ -5,20 +5,8 @@ import re
 import threading
 import urllib.request
 from pathlib import Path
-from urllib.parse import urlsplit
 
-URL_PATTERN = re.compile(r'/[a-z]{3}-[a-z]{4}-[a-z]{3}/?')
-ACTIVE = {'starting', 'waiting', 'recording', 'transcribing', 'analyzing'}
-
-
-def meeting_url(value):
-    if not isinstance(value, str):
-        raise ValueError('Paste a Google Meet link.')
-    u = urlsplit(value.strip())
-    if (u.scheme != 'https' or u.netloc != 'meet.google.com'
-            or not URL_PATTERN.fullmatch(u.path)):
-        raise ValueError('Use https://meet.google.com/abc-defg-hij. Zoom is not supported in this version.')
-    return 'https://meet.google.com' + u.path.rstrip('/')
+ACTIVE = {'starting', 'waiting', 'recording', 'transcribing', 'analyzing', 'importing'}
 
 
 class Store:
@@ -34,14 +22,14 @@ class Store:
 
     def get(self, key):
         with self.lock:
-            return json.loads((self.folder(key) / 'meeting.json').read_text())
+            return json.loads((self.folder(key) / 'meeting.json').read_text(encoding='utf-8'))
 
     def put(self, item):
         with self.lock:
             folder = self.folder(item['id'])
             folder.mkdir(exist_ok=True)
             tmp = folder / 'meeting.tmp'
-            tmp.write_text(json.dumps(item, ensure_ascii=False, indent=2))
+            tmp.write_text(json.dumps(item, ensure_ascii=False, indent=2), encoding='utf-8')
             tmp.replace(folder / 'meeting.json')
 
     def update(self, key, **changes):
@@ -53,13 +41,13 @@ class Store:
 
     def all(self):
         with self.lock:
-            return sorted([json.loads(p.read_text()) for p in self.root.glob('*/meeting.json')],
+            return sorted([json.loads(p.read_text(encoding='utf-8')) for p in self.root.glob('*/meeting.json')],
                           key=lambda x: x['created'], reverse=True)
 
     def recover(self):
         for item in self.all():
             if item['status'] in ACTIVE:
-                self.update(item['id'], status='interrupted', error='App restarted. A saved transcript can be analyzed again. Audio may be incomplete.')
+                self.update(item['id'], status='interrupted', error='App restarted. A saved transcript can be analyzed again. Import again if the transcript is missing.')
 
 
 def timestamp(seconds):
@@ -68,7 +56,7 @@ def timestamp(seconds):
 
 
 def transcript_text(segments):
-    return '\n'.join(f'[{timestamp(s["start"])}] {s["text"]}' for s in segments)
+    return '\n'.join(f'[{timestamp(s["start"])}] {(s.get("speaker", "") + ": ") if s.get("speaker") else ""}{s["text"]}' for s in segments)
 
 
 def chunks(segments, limit=7000):

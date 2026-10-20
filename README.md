@@ -1,117 +1,110 @@
-# AI Meeting Notes Bot
+# AI Meeting Notes Bot — Fathom Edition
 
-**Paste a Google Meet link → admit your bot → get a transcript, summary and pain points.**
+**Fathom records your meeting. This app imports the transcript and summary, then extracts evidence-linked pain points with optional local AI.**
 
-Built by **Ali Ahmed Khoso**. A local, single-user project with no calendar integration and no paid AI API requirement.
+Built by **Ali Ahmed Khoso**. Runs directly in Windows Python. **No Docker, browser automation, FFmpeg or pip installation required.**
 
-> **Experimental preview:** The application and offline tests are implemented. A real Google Meet admission/audio test and the full Docker build have not been verified in the development environment. Google can block guest/automated entry and change its interface. This is not a production meeting service or a guarantee that every meeting will accept the bot.
+## What changed
 
-## What it does
+The original experimental guest bot has been replaced with a read-only Fathom integration. Fathom handles admission, capture and transcription. Its API provides finished meeting content; it does not expose a public send-bot/join endpoint. You start or auto-record meetings through Fathom's app/extension, not this dashboard.
 
-- Joins a Google Meet link as a visibly named recording bot, subject to host admission and guest-access settings.
-- Captures meeting audio only after admission, using an isolated virtual audio output.
-- Transcribes after you click **Stop & generate notes**, with local faster-whisper on CPU.
-- Produces separate **Transcript**, **Summary & actions**, and **Pain points** tabs.
-- Requires extracted notes to include a matching transcript quote. Incorrect evidence references are discarded.
-- Saves meeting history locally, exports notes, retries analysis and deletes meeting data.
-- Handles a denied/timed-out join, empty speech, failed model requests and interrupted jobs visibly.
+## Features
 
-**Not included:** Zoom, calendar auto-join, detecting when you personally enter a meeting, live transcription, reliable speaker names, meeting text-chat capture, automatic email delivery, or public multi-user hosting. “Full transcript” means captured spoken audio, not chat messages. Only speech after the bot is admitted is available.
+- Browse your accessible Fathom recordings, including additional pages.
+- Import a selected recording's full spoken transcript, timestamps, supplied speaker names and Fathom summary.
+- View separate **Transcript**, **Summary & actions**, and **Pain points** tabs.
+- Optionally generate local notes/actions/pain points with Ollama; each retained note must cite a matching transcript quote.
+- Re-import without creating duplicate meetings. If the transcript changes, stale local analysis is cleared.
+- Retry failed analysis, export notes and delete local copies.
+- API key stays in the Python process; it is not sent to the browser, written into meeting data, or committed to Git.
 
-## Why this version does not use Recall.ai or Vexa
+## 1. Set up Fathom
 
-This implementation uses a small Playwright Google Meet guest adapter and PulseAudio/FFmpeg capture directly, so it does not require a bot provider subscription or a GPU transcription server. The tradeoff is that Meet browser changes and guest restrictions can break joining. It never bypasses sign-in, CAPTCHA or host controls. Vexa can be considered later for a more extensive provider integration.
+Create/sign into [Fathom](https://www.fathom.ai/) with the Google account you want to use for meetings. Install its Windows desktop app and Chrome extension through **Settings → Fathom Apps**. Keep the desktop app running and use the Chrome profile containing that extension.
 
-## Run on Windows, macOS or Linux with Docker
+For your desired **join when I enter a Google Meet** flow, enable impromptu/unscheduled Google Meet auto-recording under **Settings → Video Conferencing**. The extension detects Meet links; email sign-in alone does not detect meeting entry. If auto-record does not activate, use **Start Recording** in Meet, or **Add to Meeting** in Fathom's desktop drawer and paste the Meet link. Host admission and recording permissions still apply. Inform participants before recording.
 
-Install Git and Docker Engine + Compose (or Docker Desktop where its license applies). On Windows, use Linux containers / WSL 2. Start Docker first.
+This app does not require calendar integration. Configure Fathom's scheduled-meeting and sharing preferences separately to suit you. It does not change your account settings or send messages to attendees.
 
-```bash
-git clone https://github.com/Ali-Khoso/ai-meeting-notes-bot.git
-cd ai-meeting-notes-bot
-```
+## 2. Run the dashboard on Windows
 
-Create the settings file:
+Install Python **3.10 or later** from [python.org](https://www.python.org/downloads/windows/) and Git if needed. In PowerShell:
 
 ```powershell
-# Windows PowerShell
+git clone https://github.com/Ali-Khoso/ai-meeting-notes-bot.git
+cd ai-meeting-notes-bot
 Copy-Item .env.example .env
+notepad .env
 ```
 
-```bash
-# macOS / Linux
-cp .env.example .env
+Already cloned? Open the existing project folder, run `git pull`, and create `.env` only if it does not exist:
+
+```powershell
+git pull
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
+notepad .env
 ```
 
-Then run:
+In Fathom, go to **User Settings → API Access**, generate a key, and add it to your **local** `.env` file:
 
-```bash
-docker compose up --build -d
-docker compose exec ollama ollama pull qwen2.5:3b
+```dotenv
+FATHOM_API_KEY=your_actual_key_here
+OLLAMA_URL=http://localhost:11434
+OLLAMA_MODEL=qwen2.5:3b
 ```
 
-Open **http://localhost:8000**. The Ollama model must finish downloading before analysis can work. The first transcription also downloads the Whisper model; later runs reuse the cache. Internet is required for the meeting and initial downloads. There is no cloud AI API fallback.
+Never paste your real key into chat, source code or GitHub. API access is documented as available on all Fathom plans, with account permissions and rate limits. The free plan and feature availability remain subject to Fathom's terms.
 
-### First real test (use your own short meeting)
+Start the app:
 
-1. Start a Google Meet meeting that allows guest requests. Explain the recording to participants and obtain agreement.
-2. Paste its `https://meet.google.com/abc-defg-hij` link into the app. Give the meeting a title and confirm the recording checkbox.
-3. Click **Join meeting**, then admit **Ali’s AI Notes Bot (recording)** in Google Meet.
-4. Wait for the app to show **recording** before speaking. Say a clear problem and an action, for example: “We miss after-hours calls. Ali will check the voicemail process tomorrow.”
-5. After 30–60 seconds, click **Stop & generate notes**. Keep Docker and the computer running.
-6. Review the transcript first, then the summary and pain points. Check that evidence quotes match what was actually said.
-
-Always use the Stop button at the end. The bot notices removal/disconnection and has a two-hour default limit, but may remain alone in a meeting after others leave. Stop during waiting cancels entry; it cannot immediately interrupt a browser navigation. Analysis and transcription finish in the background and may be slow on CPU.
-
-## Hardware and cost
-
-No paid Recall.ai, speech-to-text or LLM API is required. You supply hardware, internet, storage and electricity. Start with a short meeting; **16 GB RAM is a practical target, not a tested minimum or performance guarantee**. A small laptop may struggle with Docker, Chromium and models together. Try `WHISPER_MODEL=tiny` for lower transcription resource use (less accurate). Models and container images require several GB of disk space. This app processes one meeting at a time to prevent audio mixing.
-
-## Architecture
-
-| Component | Role |
-|---|---|
-| Python local HTTP server | Dashboard API, history and background jobs |
-| Playwright Chromium | Requests guest entry into Google Meet |
-| PulseAudio + FFmpeg | Captures the isolated browser audio to a WAV file |
-| faster-whisper (CPU, int8) | Produces timestamped transcript segments |
-| Ollama + Qwen 2.5 3B | Extracts notes from transcript chunks |
-| Docker volumes | Persist models, audio and notes |
-
-Long transcripts are processed in chunks, without silently dropping the remainder. The summary is a combined set of chunk-level notes, not a second global synthesis. Transcript prompts are treated as untrusted data. Quote validation helps review but does **not** prove that a model's interpretation, owner or deadline is correct. Verify important decisions manually. Mixed Urdu/English accuracy depends on the audio and model.
-
-## Local data and privacy
-
-- Participants must know and agree to recording. The bot's display name includes “recording”. The app does not send a separate in-meeting announcement.
-- Audio and notes stay in the `meeting-data` Docker volume. AI inference stays in the Compose network. Google still receives the browser connection as part of the meeting.
-- Delete removes the selected meeting folder, including audio and notes. Export downloads a plain-text report.
-- The UI has no user accounts: it is for your own computer. Compose binds port 8000 to `127.0.0.1`. Do not publicly expose it or remove the host/origin checks.
-- Secrets, recordings, transcripts and `.env` are excluded from Git. Model caches persist in separate volumes.
-- `docker compose down` stops services and keeps data. Adding `-v` permanently removes all these volumes, including your recordings and models.
-
-## Troubleshooting
-
-See [setup and troubleshooting](docs/SETUP.md) and the [live acceptance checklist](docs/TESTING.md).
-
-```bash
-docker compose logs --tail=100 app
-docker compose logs --tail=100 ollama
+```powershell
+py -3 -m app.server
 ```
 
-## Development checks
+Open **http://localhost:8000** and leave the terminal running. You can also double-click `start-windows.bat`. If `py` is unavailable but Python is on PATH, use `python -m app.server`.
 
-Core and API tests use Python's standard library; they do not download models or join meetings:
+After Fathom finishes processing a recording, click **Load my Fathom recordings → Import**. The transcript and Fathom summary work without Ollama or a GPT/Gemini key. Click **Load more recordings** for older calls. **Refresh from Fathom** fetches updates for the selected recording. This version uses manual import, not automatic webhook syncing.
 
-```bash
-python -m unittest discover -s tests -v
+## 3. Optional pain-point analysis — no Docker
+
+Install the native [Ollama app](https://ollama.com/download) on your computer, then run:
+
+```powershell
+ollama pull qwen2.5:3b
 ```
 
-To preview the dashboard without Docker: `python -m app.server`, then open localhost:8000. **Joining meetings still requires the Docker audio/browser environment.** No fake meeting results are shown by default.
+Keep Ollama running. Select an imported meeting in the dashboard and click **Analyze pain points (Ollama)**. This also generates local summary/action notes. The Fathom summary remains separately labelled in the Summary tab. If Ollama is unavailable, imported content is preserved and analysis can be retried.
 
-## References
+The model download is several GB and CPU analysis may be slow. Hardware, internet and electricity are your own costs; no paid AI API is used. Optional local analysis is not a claim that Fathom's paid AI features are free.
 
-- [Playwright Docker documentation](https://playwright.dev/python/docs/docker)
-- [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
-- [Ollama chat API](https://docs.ollama.com/api/chat)
+## Data and limitations
 
-The existing repository license is retained. Third-party tools and models have their own licenses.
+- Fathom processes and stores the original recording/transcript in its service. The imported copies and local analysis are saved in `data/` on your computer. This is **not** an entirely offline recording workflow.
+- Deleting here removes only local copies. It does not delete the original in Fathom. Old Docker volumes, if any, are not migrated or deleted.
+- The app binds to `127.0.0.1` and checks request hosts/origins. There is no login system: do not expose it publicly or deploy this unchanged as a multi-user site.
+- Transcript means captured speech, not meeting text-chat messages. Speaker names come from Fathom and can be missing or wrong.
+- Imported Fathom Markdown is displayed as plain text for safety. It is not passed to an HTML renderer.
+- AI interpretation can still be wrong even with a matching quote. Verify decisions, owners and deadlines. Empty pain-point lists are valid.
+- Long transcripts are processed in chunks and notes combined; this is not a global second-pass synthesis.
+- No live transcript streaming, calendar access, meeting-join API or background auto-import is included.
+
+## Tests and validation
+
+```powershell
+py -3 -m unittest discover -s tests -v
+```
+
+20 offline tests passed during this update: API shape normalization, pagination, duplicate imports, missing-key handling, secret redaction, cross-origin rejection, local deletion, saved-content recovery and evidence validation. Provider calls are mocked. **A live Fathom import and actual Ollama inference have not been tested with your account or hardware.** See [setup](docs/SETUP.md) and [acceptance checklist](docs/TESTING.md).
+
+## API and setup references
+
+- [Fathom API FAQ](https://developers.fathom.ai/faq)
+- [API quickstart](https://developers.fathom.ai/quickstart)
+- [Meeting listing](https://developers.fathom.ai/api-reference/meetings/list-meetings)
+- [Transcript endpoint](https://developers.fathom.ai/api-reference/recordings/get-transcript)
+- [Summary endpoint](https://developers.fathom.ai/api-reference/recordings/get-summary)
+- [Google Meet setup](https://help.fathom.video/en/articles/449472)
+- [Chrome extension](https://help.fathom.video/en/articles/640576)
+- [Recording settings](https://help.fathom.video/en/articles/3239617)
+
+The repository's existing license is retained. Fathom and Ollama are independent services/tools with their own terms and model licenses.

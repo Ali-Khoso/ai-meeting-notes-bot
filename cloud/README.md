@@ -8,6 +8,18 @@ Private, single-owner dashboard. Fathom records the meeting; click **Import** af
 
 The preview shows a meeting loaded from Supabase, with controls to view its transcript and summary, download a text copy, or delete the saved copy.
 
+## Setup screenshots
+
+These screenshots show the Fathom recording, exported transcript, Supabase API activity, and database schema used in this project.
+
+![Fathom recording](screenshots/fathom-recording.png)
+
+![Exported meeting transcript](screenshots/transcript-export.png)
+
+![Supabase API logs](screenshots/supabase-api-logs.png)
+
+![Supabase meetings table schema](screenshots/supabase-schema.png)
+
 ## 1. Create your database and login
 
 1. Create a Supabase project at https://supabase.com/dashboard.

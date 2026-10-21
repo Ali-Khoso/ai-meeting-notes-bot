@@ -1,0 +1,9 @@
+<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Meeting Notes · Ali Khoso</title><link rel="stylesheet" href="/style.css"></head><body><main>
+<header><span>ALI KHOSO / MEETING WORKSPACE</span><h1>Your conversations.<br>Your next steps.</h1><p>Import a Fathom recording and keep its transcript and summary in your private database.</p></header>
+<p id="status" role="status" aria-live="polite"></p>
+<form id="login"><h2>Sign in</h2><label>Email<input id="email" type="email" autocomplete="username" required></label><label>Password<input id="password" type="password" autocomplete="current-password" required></label><button>Sign in</button></form>
+<section id="workspace" hidden><nav><button id="load">Load Fathom recordings</button><button id="refresh">Refresh saved meetings</button><button id="logout">Sign out</button></nav>
+<div class="columns"><aside><h2>Fathom recordings</h2><div id="remote">Load recordings to import a meeting.</div><button id="more" hidden>Load more</button><h2>Saved meetings</h2><div id="saved"></div></aside>
+<article><h2 id="title">Select a saved meeting</h2><p id="date"></p><div id="details" hidden><nav><button id="transcriptTab">Transcript</button><button id="summaryTab">Summary</button><button id="export">Download text</button><button id="delete">Delete saved copy</button></nav><pre id="content"></pre></div></article></div>
+<p class="note">Imports happen when you click Import. Deleting a saved copy does not delete the Fathom recording. This cloud version stores spoken transcripts and Fathom summaries; local Ollama analysis remains available in the Python version.</p></section>
+</main><script type="module" src="/app.js"></script></body></html>

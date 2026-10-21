@@ -1,3 +1,7 @@
+## Vercel + database version
+
+The new [`cloud/`](cloud/README.md) app stores imported Fathom transcripts and summaries in Supabase, with private sign-in. For Vercel deployment, set **Root Directory to `cloud`** and follow its setup guide. Imports are manual after meetings finish; automatic webhook syncing is not included. The Python version below remains available for local Ollama pain-point analysis.
+
 # AI Meeting Notes Bot — Fathom Edition
 
 **Fathom records your meeting. This app imports the transcript and summary, then extracts evidence-linked pain points with optional local AI.**

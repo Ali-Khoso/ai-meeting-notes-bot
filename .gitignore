@@ -9,3 +9,6 @@ __pycache__/
 *.wav
 *.mp4
 *.log
+
+node_modules/
+.vercel/

@@ -8,6 +8,18 @@ The new [`cloud/`](cloud/README.md) app stores imported Fathom transcripts and s
 
 Built by **Ali Ahmed Khoso**. Runs directly in Windows Python. **No Docker, browser automation, FFmpeg or pip installation required.**
 
+## Project screenshots
+
+![Meeting dashboard preview](cloud/screenshots/dashboard-demo.png)
+
+![Fathom recording](cloud/screenshots/fathom-recording.png)
+
+![Transcript export](cloud/screenshots/transcript-export.png)
+
+![Supabase API logs](cloud/screenshots/supabase-api-logs.png)
+
+![Supabase database schema](cloud/screenshots/supabase-schema.png)
+
 ## What changed
 
 The original experimental guest bot has been replaced with a read-only Fathom integration. Fathom handles admission, capture and transcription. Its API provides finished meeting content; it does not expose a public send-bot/join endpoint. You start or auto-record meetings through Fathom's app/extension, not this dashboard.

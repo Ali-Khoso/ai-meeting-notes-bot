@@ -2,6 +2,12 @@
 
 Private, single-owner dashboard. Fathom records the meeting; click **Import** after processing to store the spoken transcript (speaker, timestamp, text) and Fathom summary in Supabase PostgreSQL. Records survive browser restarts and Vercel redeploys. No Docker or paid AI API is required by this version; provider plan limits still apply.
 
+## Dashboard preview
+
+![Meeting dashboard showing an imported Fathom recording](screenshots/dashboard-demo.png)
+
+The preview shows a meeting loaded from Supabase, with controls to view its transcript and summary, download a text copy, or delete the saved copy.
+
 ## 1. Create your database and login
 
 1. Create a Supabase project at https://supabase.com/dashboard.
